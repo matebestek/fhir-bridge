@@ -1,0 +1,23 @@
+.idea
+
+target
+
+*-local.yml
+keystore/
+
+# Python
+venv
+*.venv
+.pytest_cache
+
+# Robot Tests
+**results**
+
+# VSCode
+.classpath
+.factorypath
+.project
+.settings/
+.vscode/**
+
+fhir-bridge.iml
