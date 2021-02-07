@@ -22,12 +22,13 @@ workflows:
     jobs:
         - quick-test-fhirbridge:
             context: org-global
-            #   filters:
-            #     branches:
-            #       ignore:
-            #         - master
-            #         - develop
-            #         - release
+            filters:
+                branches:
+                    ignore:
+                    - gh-pages
+                    # - master
+                    # - develop
+                    # - release
         - full-test-fhirbridge:
             context: org-global
         - tag-version:
@@ -46,6 +47,22 @@ workflows:
                 branches:
                     only:
                         - /^(release\/v\d+\.\d+\.\d+|hotfix\/v\d+\.\d+\.\d+|master|develop)$/
+        
+        - deploy-to-github-pages:
+            requires:
+                - full-test-fhirbridge
+            filters:
+                branches:
+                    only:
+                        - /^(release\/v\d+\.\d+\.\d+|hotfix\/v\d+\.\d+\.\d+|master|develop)$/
+
+#   deploy_github_pages:
+#     jobs:
+#         - deploy-testdocs:
+#             filters:
+#                 branches:
+#                     only:
+#                         - gh-pages
 
 
 
@@ -162,6 +179,16 @@ jobs:
                       mvn spring-boot:build-image -Dspring-boot.build-image.imageName=ehrbase/fhir-bridge:$TAG -Dmaven.test.skip
                       docker tag ehrbase/fhir-bridge ehrbase/fhir-bridge:$TAG
                       docker push ehrbase/fhir-bridge:$TAG
+
+
+    deploy-to-github-pages:
+        docker:
+            - image: cimg/openjdk:11.0.8
+              auth:
+                  username: $DOCKER_USER
+                  password: $DOCKER_HUB_PASSWORD
+        steps:
+            - checkout
 
 
 
