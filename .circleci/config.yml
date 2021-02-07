@@ -31,6 +31,10 @@ workflows:
                     # - release
         - full-test-fhirbridge:
             context: org-global
+            filters:
+                branches:
+                    ignore:
+                    - gh-pages
         - tag-version:
             context: org-global
             requires:
