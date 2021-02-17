@@ -1,88 +1,22 @@
 version: 2.1
 
-# OVERVIEW - What this CI pipeline does:
-#
-# 1. So far this pipeline consists of one workflow only, which
-#    - clones ehrbase repo
-#    - builds ehrbase server from develop branch
-#    - starts ehrbase server (postgresql db is included in used docker executor,
-#                             see executors section at the buttom)
-#    - builds FHIR-bridge code
-#    - runs (Java) integration tests
-#    - creates code coverage report w/ Jacoco
-#    - performes sonarcloud.io code analysis
-#    - creates a tag and pushes that to Git
-#    - Builds the Docker image and pushes that do DockerHub with appropriate tag
-
 
 workflows:
-
-  # WORKFLOW 1/1 Build, Test & Analyze FHIR-bridge code
-  build_and_test_fhirbridge:
+  nightly:
+    triggers:
+      - schedule:
+          cron: "0 21 * * *"
+          filters:
+            branches:
+              only:
+                - feature/NUM-985-nightly-builds
     jobs:
-        - build-and-quicktest-fhirbridge:
-            context: org-global
-            #   filters:
-            #     branches:
-            #       ignore:
-            #         - master
-            #         - develop
-            #         - release
-        - build-and-test-fhirbridge:
-            context: org-global
-        - tag-version:
-            context: org-global
-            requires:
-                - build-and-test-fhirbridge
-            filters:
-                branches:
-                    only:
-                        - /^(release\/v\d+\.\d+\.\d+|hotfix\/v\d+\.\d+\.\d+)$/
-        - build_and_deploy:
-            context: org-global
-            requires:
-                - build-and-test-fhirbridge
-            filters:
-                branches:
-                    only:
-                        - /^(release\/v\d+\.\d+\.\d+|hotfix\/v\d+\.\d+\.\d+|master|develop)$/
-
-
-
-
-
+      - build-and-test-fhirbridge:
+          context:
+            - org-global
 
 
 jobs:
-    #           88    ,ad8888ba,    88888888ba    ad88888ba
-    #           88   d8"'    `"8b   88      "8b  d8"     "8b
-    #           88  d8'        `8b  88      ,8P  Y8,
-    #           88  88          88  88aaaaaa8P'  `Y8aaaaa,
-    #           88  88          88  88""""""8b,    `"""""8b,
-    #           88  Y8,        ,8P  88      `8b          `8b
-    #   88,   ,d88   Y8a.    .a8P   88      a8P  Y8a     a8P
-    #    "Y8888P"     `"Y8888Y"'    88888888P"    "Y88888P"
-
-
-    build-and-quicktest-fhirbridge:
-        description: Build and test FHIR-bridge
-        executor: docker-py3-java11-postgres
-        steps:
-            - checkout
-            - install-maven
-            - git-clone-ehrbase-repo
-            - cache-out-fhirbridge-m2-dependencies
-            - cache-out-ehrbase-m2-dependencies
-            - build-ehrbase
-            - start-ehrbase-server
-            - build-and-test-fhirbridge
-            - cache-in-ehrbase-m2-dependencies
-            - cache-in-fhirbridge-m2-dependencies
-            # - collect-fhirbridge-unittest-results
-            - collect-fhirbridge-integrationtest-results
-            - save-fhirbridge-test-results
-
-
     build-and-test-fhirbridge:
         description: |
             Build and test FHIR-bridge, analyze code, collect code coverage metrics,
@@ -110,76 +44,9 @@ jobs:
                 cache_version: 1
 
 
-    tag-version:
-        docker:
-            - image: circleci/openjdk:stretch
-        steps:
-            - checkout
-            - configure-git-for-ci-bot
-            - run:
-                  name: Update Snapshot Version
-                  description: |
-                      This automatically sets the application version when there is a commit to release or hotfix branch.
-                      The version number is parsed from the branch name, for example release/v1.0.5 will create a tag v1.0.5
-                      and set the version number in pom.xml to same version.
-                  command: |
-                      VERSION_NUMBER="$(echo $CIRCLE_BRANCH | awk -F'/v' '{print $2;}')"
-                      echo "Updating the application version from the branch to ${VERSION_NUMBER}"
-                      ./mvnw versions:set -DnewVersion=$VERSION_NUMBER versions:commit
-
-                      git commit -am "updated version to ${VERSION_NUMBER} [skip ci]"
-                      git tag -a v$VERSION_NUMBER -m "fhir-bridge release version v${VERSION_NUMBER}"
-                      git push --set-upstream origin $CIRCLE_BRANCH
-                      git push origin --tags
-
-                      exit 0
-
-
-    build_and_deploy:
-        docker:
-            - image: cimg/openjdk:11.0.8
-              auth:
-                  username: $DOCKER_USER
-                  password: $DOCKER_HUB_PASSWORD
-        steps:
-            - checkout
-            - install-maven
-            - configure-git-for-ci-bot
-            - setup_remote_docker:
-                  version: 19.03.13
-            - run:
-                  name: Build and tag image and push
-                  command: |
-                      if [ $CIRCLE_BRANCH = "master" ]; then
-                          TAG=$(./mvnw -q -Dexec.executable="echo" -Dexec.args='${project.version}' --non-recursive exec:exec)
-                      elif [ $CIRCLE_BRANCH = "develop" ]; then
-                          TAG="next"
-                      else
-                          TAG="$(echo $CIRCLE_BRANCH | awk -F'/' '{print $2;}')-rc"
-                      fi
-                      echo "Publishing Docker image with following tag: ${TAG}"
-                      echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_USER" --password-stdin
-                      #   ./mvnw clean install -DskipTests -Djdk.tls.client.protocols=TLSv1.2
-                      #   docker build -t ehrbase/fhir-bridge:$TAG .
-                      mvn spring-boot:build-image -Dspring-boot.build-image.imageName=ehrbase/fhir-bridge:$TAG -Dmaven.test.skip
-                      docker tag ehrbase/fhir-bridge ehrbase/fhir-bridge:$TAG
-                      docker push ehrbase/fhir-bridge:$TAG
-
-
-
-
-
 
 commands:
-    #     ,ad8888ba,    ,ad8888ba,    88b           d88  88b           d88         db         888b      88  88888888ba,     ad88888ba
-    #    d8"'    `"8b  d8"'    `"8b   888b         d888  888b         d888        d88b        8888b     88  88      `"8b   d8"     "8b
-    #   d8'           d8'        `8b  88`8b       d8'88  88`8b       d8'88       d8'`8b       88 `8b    88  88        `8b  Y8,
-    #   88            88          88  88 `8b     d8' 88  88 `8b     d8' 88      d8'  `8b      88  `8b   88  88         88  `Y8aaaaa,
-    #   88            88          88  88  `8b   d8'  88  88  `8b   d8'  88     d8YaaaaY8b     88   `8b  88  88         88    `"""""8b,
-    #   Y8,           Y8,        ,8P  88   `8b d8'   88  88   `8b d8'   88    d8""""""""8b    88    `8b 88  88         8P          `8b
-    #    Y8a.    .a8P  Y8a.    .a8P   88    `888'    88  88    `888'    88   d8'        `8b   88     `8888  88      .a8P   Y8a     a8P
-    #     `"Y8888Y"'    `"Y8888Y"'    88     `8'     88  88     `8'     88  d8'          `8b  88      `888  88888888Y"'     "Y88888P"
-
+    
 
     git-clone-ehrbase-repo:
         steps:
